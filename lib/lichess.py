@@ -171,7 +171,7 @@ class Lichess:
                           giveup_log_level=logging.DEBUG)
     def api_get(self, endpoint_name: str, *template_args: str,
                 params: dict[str, str] | None = None,
-                stream: bool = False, timeout: int = 2) -> requests.Response:
+                stream: bool = False, timeout: int | tuple[int, int] = 2) -> requests.Response:
         """
         Send a GET to lichess.org.
 
@@ -377,7 +377,7 @@ class Lichess:
 
     def get_event_stream(self) -> requests.models.Response:
         """Get a stream of the events (e.g. challenge, gameStart)."""
-        return self.api_get("stream_event", stream=True, timeout=15)
+        return self.api_get("stream_event", stream=True, timeout=(15, 20))
 
     def get_game_stream(self, game_id: str) -> requests.models.Response:
         """Get  stream of the in-game events (e.g. moves by the opponent)."""

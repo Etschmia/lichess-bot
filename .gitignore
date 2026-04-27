@@ -9,3 +9,11 @@ lichess_bot_auto_logs/*
 *.log
 *.txt
 TEMP/*
+
+# Martuni-lokale Dateien (nicht upstream)
+.codex
+challenge_cron_state.json
+challenge_cron_state_blitz.json
+challenge_cron_state_rapid.json
+challenge_cron_tracking.json
+challenge_manual_state.json
