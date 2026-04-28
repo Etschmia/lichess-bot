@@ -1,6 +1,6 @@
 # Wie `/api/bot/online` in Lichess funktioniert
 
-Recherchiert 2026-04-25 anhand des Lila-Quellcodes (lichess-org/lila auf GitHub).
+Recherchiert 2026-04-25 / ergänzt 2026-04-28 anhand des Lila-Quellcodes (lichess-org/lila auf GitHub).
 
 ---
 
@@ -13,6 +13,8 @@ Recherchiert 2026-04-25 anhand des Lila-Quellcodes (lichess-org/lila auf GitHub)
 | `modules/bot/src/main/GameStateStream.scala` | Ruft `setOnline` alle 7 s vom Game-Stream aus auf |
 | `modules/user/src/main/UserApi.scala` | `visibleBotsByIds()` — die MongoDB-Query hinter dem Endpoint |
 | `app/controllers/PlayApi.scala` | HTTP-Handler für `GET /api/bot/online` |
+| `modules/round/src/main/Finisher.scala` | Berechnet und schreibt `time.human` am Spielende |
+| `modules/user/src/main/UserRepo.scala` | `incNbGames()` — das atomare `$inc` auf `time.human` |
 
 ---
 
@@ -62,7 +64,58 @@ Bei `?nb=200` (unser Check-Skript) sieht man alle 200; auf lichess.org/player/bo
 werden weniger angezeigt. Je weiter oben Martuni steht, desto häufiger
 taucht es in kleineren Slices auf.
 
-### 4. Challenge-Aktivität hat keinen Einfluss
+### 4. Wie `time.human` berechnet wird (Finisher.scala)
+
+Quelle: `modules/round/src/main/Finisher.scala` + `modules/user/src/main/UserRepo.scala`
+
+```scala
+// Finisher.scala — wird für White und Black separat aufgerufen
+private def incNbGames(game: Game, opponent: Option[UserWithPerfs])(user: UserWithPerfs): Funit =
+  (game.finished && (user.noBot || game.nonAi)).so:
+    val totalTime = (game.hasClock && user.playTime.isDefined).so(game.durationSeconds)
+    userRepo.incNbGames(
+      ...,
+      botVsHuman = user.isBot && opponent.exists(_.noBot)
+    )
+```
+
+```scala
+// UserRepo.scala — das $inc auf MongoDB
+totalTime.ifTrue(botVsHuman).map(v =>
+  BSONElement(s"${F.playTime}.human", BSONInteger(v + 2))
+)
+```
+
+**Alle Bedingungen müssen gleichzeitig erfüllt sein:**
+
+| Bedingung | Detail |
+|---|---|
+| `game.finished` | Abgebrochene Partien zählen nicht |
+| `user.noBot \|\| game.nonAi` | Für einen Bot (noBot=false): `game.nonAi` muss true sein — also kein KI-Gegner |
+| `user.isBot` | Nur der Bot-Account bekommt `time.human` erhöht, nicht der menschliche Gegner |
+| `opponent.exists(_.noBot)` | Gegner muss ein echter User-Account sein, dessen Titel ≠ BOT. `None` (KI) gibt `false` |
+| `game.hasClock` | Partien ohne Uhr (Correspondence, Unlimited) zählen nicht |
+| `totalTime` | `durationSeconds` — Wanduhrzeit von `createdAt` bis letztem Zug, max 12 h |
+
+**Was addiert wird:** `durationSeconds + 2` Sekunden (Wanduhrzeit der Partie, nicht Bedenkzeit).
+
+**Zeitpunkt:** Synchron beim Spielende — kein Batch-Job, sofortiger `$inc`.
+
+**Farbe / Challenger-Rolle:** Irrelevant. Weiß und Schwarz werden identisch behandelt.
+
+#### Was zählt, was zählt nicht
+
+| Gegnertyp | Zählt? | Grund |
+|---|---|---|
+| Menschlicher Lichess-Account | ✅ Ja | `opponent.exists(_.noBot)` = true |
+| Anderer BOT-Account | ❌ Nein | `opponent.noBot` = false |
+| Lichess AI (Level 1–8) | ❌ Nein | Kein User-Account → `opponent = None`, außerdem `game.nonAi = false` → äußere Bedingung false |
+| Correspondence ohne Uhr | ❌ Nein | `game.hasClock` = false |
+| Abgebrochene Partie | ❌ Nein | `game.finished` = false |
+
+**Zeitkontroll-Effizienz:** Rapid/Classical tragen pro Partie mehr Sekunden bei als Blitz, weil Wanduhrzeit summiert wird.
+
+### 5. Challenge-Aktivität hat keinen Einfluss
 
 Challenge-API und `OnlineApiUsers` sind vollständig getrennt. Der challenge-cron
 verändert das Listing **nicht** direkt. Die beobachtete Korrelation
@@ -111,8 +164,9 @@ Das wäre eine minimale Änderung mit upstream-PR-Potenzial.
 
 | Maßnahme | Effekt | Aufwand |
 |---|---|---|
-| **`time.human` erhöhen** (mehr Partien gegen Menschen) | Direktes Ranking-Kriterium | Mittel — Challenge-Cron auf menschliche Gegner ausrichten oder eingehende Challenges von Menschen annehmen |
-| Bio im Lichess-Profil gesetzt halten | Pflichtvoraussetzung | Einmalig, bereits erledigt |
+| **Partien gegen menschliche Accounts** (nicht gegen Bots oder Lichess-KI) | Direktes Ranking-Kriterium — einziger Weg `time.human` zu erhöhen | Challenge-Cron auf Menschen ausrichten; eingehende Challenges von Menschen annehmen |
+| **Längere Zeitkontrollen bevorzugen** (Rapid 10+0 statt Blitz 3+0) | Mehr Wanduhrzeit pro Partie → mehr `time.human` pro Spiel | Konfiguration in `config.yml` |
+| Bio im Lichess-Profil gesetzt halten | Pflichtvoraussetzung für Listing | Einmalig, bereits erledigt |
 | Stream-Stabilität verbessern (Read-Timeout-Fix) | Verhindert unnötige Offline-Phasen | Klein — 2 Zeilen in `lib/lichess.py` |
 | Cron-Pacing (≥ 30 s zwischen Challenges, Abbruch bei 429) | Verhindert Rate-Limit → Verhindert längere Offline-Phasen | Bereits umgesetzt (2026-04-25) |
 
