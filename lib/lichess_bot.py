@@ -709,6 +709,7 @@ def play_game(li: lichess.Lichess,
             disconnect_time = correspondence_disconnect_time if not game.state.get("moves") else seconds(0)
             prior_game = None
             board = chess.Board()
+            clock_history: dict[int, tuple[int, int]] = {}
             game_stream = itertools.chain([json.dumps(game.state).encode("utf-8")], lines)
             quit_after_all_games_finish = config.quit_after_all_games_finish
             stay_in_game = True
@@ -757,6 +758,11 @@ def play_game(li: lichess.Lichess,
                         wbinc = upd[engine_wrapper.wbinc(board)]
                         terminate_time = msec(wbtime) + msec(wbinc) + seconds(60)
                         game.ping(abort_time, terminate_time, disconnect_time)
+
+                        move_count = len(board.move_stack)
+                        if move_count > 0 and "wtime" in upd and "btime" in upd:
+                            clock_history[move_count - 1] = (upd["wtime"], upd["btime"])
+
                         prior_game = copy.deepcopy(game)
                     elif u_type == "ping" and should_exit_game(board, game, prior_game, li, is_correspondence):
                         stay_in_game = False
@@ -765,7 +771,7 @@ def play_game(li: lichess.Lichess,
                     stopped = isinstance(e, StopIteration)
                     stay_in_game = not stopped and (move_attempted or game_is_active(li, game.id))
 
-            pgn_record = try_get_pgn_game_record(li, config, game, board, engine)
+            pgn_record = try_get_pgn_game_record(li, config, game, board, engine, clock_history)
         final_queue_entries(control_queue, correspondence_queue, game, is_correspondence, pgn_record, pgn_queue)
         delete_takeback_record(game)
 
@@ -982,7 +988,8 @@ def tell_user_game_result(game: model.Game, board: chess.Board) -> None:
 
 
 def try_get_pgn_game_record(li: lichess.Lichess, config: Configuration, game: model.Game, board: chess.Board,
-                            engine: engine_wrapper.EngineWrapper) -> str:
+                            engine: engine_wrapper.EngineWrapper,
+                            clock_history: dict[int, tuple[int, int]]) -> str:
     """
     Call `print_pgn_game_record` to write the game to a PGN file and handle errors raised by it.
 
@@ -991,16 +998,18 @@ def try_get_pgn_game_record(li: lichess.Lichess, config: Configuration, game: mo
     :param game: Contains information about the game (e.g. the players' names).
     :param board: The board. Contains the moves.
     :param engine: The engine. Contains information about the moves (e.g. eval, PV, depth).
+    :param clock_history: Per-half-move (wtime_ms, btime_ms) snapshots from the game stream.
     """
     try:
-        return pgn_game_record(li, config, game, board, engine)
+        return pgn_game_record(li, config, game, board, engine, clock_history)
     except Exception:
         logger.exception("Error writing game record:")
         return ""
 
 
 def pgn_game_record(li: lichess.Lichess, config: Configuration, game: model.Game, board: chess.Board,
-                    engine: engine_wrapper.EngineWrapper) -> str:
+                    engine: engine_wrapper.EngineWrapper,
+                    clock_history: dict[int, tuple[int, int]]) -> str:
     """
     Return the text of the game's PGN.
 
@@ -1009,6 +1018,7 @@ def pgn_game_record(li: lichess.Lichess, config: Configuration, game: model.Game
     :param game: Contains information about the game (e.g. the players' names).
     :param board: The board. Contains the moves.
     :param engine: The engine. Contains information about the moves (e.g. eval, PV, depth).
+    :param clock_history: Per-half-move (wtime_ms, btime_ms) snapshots from the game stream.
     """
     if not config.pgn_directory:
         return ""
@@ -1043,9 +1053,16 @@ def pgn_game_record(li: lichess.Lichess, config: Configuration, game: model.Game
         next_lichess_node = lichess_node.next()
         if next_lichess_node:
             lichess_node = next_lichess_node
-            current_node.set_clock(lichess_node.clock())
-            if current_node.comment != lichess_node.comment:
-                current_node.comment = f"{current_node.comment} {lichess_node.comment}".strip()
+            stream_clock = clock_history.get(index)
+            if stream_clock is not None:
+                wtime_ms, btime_ms = stream_clock
+                clock_ms = wtime_ms if index % 2 == 0 else btime_ms
+                current_node.set_clock(clock_ms / 1000)
+            else:
+                current_node.set_clock(lichess_node.clock())
+            lichess_comment = chess.pgn.CLOCK_REGEX.sub("", lichess_node.comment).strip()
+            if lichess_comment and current_node.comment != lichess_comment:
+                current_node.comment = f"{current_node.comment} {lichess_comment}".strip()
 
         commentary = engine.comment_for_board_index(index)
         pv_node = current_node.parent.add_line(commentary["pv"]) if "pv" in commentary else current_node
