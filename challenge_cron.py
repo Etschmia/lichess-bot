@@ -64,6 +64,7 @@ else:  # blitz
 
 POLL_INTERVAL = 5          # check every 5 seconds
 PRE_CHALLENGE_DELAY = 10   # pause before sending each challenge
+ELO_WINDOW = 300           # only challenge bots within ±this many Elo (in MODE's perf)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -105,10 +106,10 @@ def api_post(path: str, **kwargs) -> requests.Response:
     return requests.post(url, headers=HEADERS, timeout=TIMEOUT, **kwargs)
 
 
-def get_my_username() -> str:
+def get_my_account() -> dict:
     r = api_get("/api/account")
     r.raise_for_status()
-    return r.json()["username"]
+    return r.json()
 
 
 def get_online_bots() -> list[dict]:
@@ -295,8 +296,9 @@ def handle_previous_instance() -> bool:
 # ---------------------------------------------------------------------------
 # Choose opponent
 # ---------------------------------------------------------------------------
-def choose_opponent(my_username: str, exclude: set[str] | None = None) -> dict | None:
-    """Pick a random online bot that accepts bot challenges."""
+def choose_opponent(my_username: str, my_rating: int,
+                    exclude: set[str] | None = None) -> dict | None:
+    """Pick a random online bot that accepts bot challenges and is within ±ELO_WINDOW of us."""
     exclude = exclude or set()
     tracking = load_tracking()
 
@@ -309,6 +311,7 @@ def choose_opponent(my_username: str, exclude: set[str] | None = None) -> dict |
 
     online = get_online_bots()
     candidates = []
+    skipped_rating = 0
     for bot in online:
         username = bot.get("username", "")
         if username.lower() == my_username.lower():
@@ -319,7 +322,17 @@ def choose_opponent(my_username: str, exclude: set[str] | None = None) -> dict |
             continue
         if username.lower() in exclude:
             continue
+        if my_rating > 0:
+            opp_perf = bot.get("perfs", {}).get(MODE, {})
+            opp_rating = opp_perf.get("rating", 0)
+            opp_games = opp_perf.get("games", 0)
+            if opp_games == 0 or opp_rating == 0 or abs(opp_rating - my_rating) > ELO_WINDOW:
+                skipped_rating += 1
+                continue
         candidates.append(bot)
+
+    log.info("Candidate pool: %d bots within ±%d Elo of %d (%d filtered out by rating).",
+             len(candidates), ELO_WINDOW, my_rating, skipped_rating)
 
     if not candidates:
         log.warning("No eligible online bots found.")
@@ -355,13 +368,13 @@ def save_tc_index(index: int) -> None:
 # ---------------------------------------------------------------------------
 # Main flow
 # ---------------------------------------------------------------------------
-def run_tc(my_username: str, clock_limit: int, clock_inc: int, tc_label: str) -> None:
+def run_tc(my_username: str, my_rating: int, clock_limit: int, clock_inc: int, tc_label: str) -> None:
     """Run the full challenge flow for one time control (up to MAX_ATTEMPTS)."""
     MAX_ATTEMPTS = 10
     tried_this_run: set[str] = set()
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
-        opponent_info = choose_opponent(my_username, exclude=tried_this_run)
+        opponent_info = choose_opponent(my_username, my_rating, exclude=tried_this_run)
         if opponent_info is None:
             log.warning("[%s] No more eligible bots to challenge.", tc_label)
             return
@@ -417,15 +430,17 @@ def main() -> None:
     if ongoing:
         log.info("Bot has 1 ongoing game — proceeding anyway.")
 
-    my_username = get_my_username()
-    log.info("Bot account: %s", my_username)
+    account = get_my_account()
+    my_username = account["username"]
+    my_rating = account.get("perfs", {}).get(MODE, {}).get("rating", 0)
+    log.info("Bot account: %s (%s rating: %d)", my_username, MODE, my_rating)
 
     tc_index = get_next_tc_index()
     clock_limit, clock_inc, tc_label = TC_OPTIONS[tc_index]
 
     try:
         log.info("--- Starting time control: %s (index %d / %d) ---", tc_label, tc_index, len(TC_OPTIONS))
-        run_tc(my_username, clock_limit, clock_inc, tc_label)
+        run_tc(my_username, my_rating, clock_limit, clock_inc, tc_label)
     except RateLimited as e:
         log.warning("Aborting cron run — Lichess rate-limited the account: %s", e)
 
