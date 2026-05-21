@@ -15,5 +15,7 @@ TEMP/*
 challenge_cron_state.json
 challenge_cron_state_blitz.json
 challenge_cron_state_rapid.json
+challenge_cron_cooldown.json
 challenge_cron_tracking.json
 challenge_manual_state.json
+martuni_bot_check.csv

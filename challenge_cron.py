@@ -14,7 +14,7 @@ import signal
 import sys
 import time
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -42,7 +42,14 @@ CONFIG_PATH = SCRIPT_DIR / "config.yml"
 STATE_FILE = SCRIPT_DIR / f"challenge_cron_state_{MODE}.json"
 TC_INDEX_FILE = SCRIPT_DIR / f"challenge_cron_tc_index_{MODE}.json"
 TRACKING_FILE = SCRIPT_DIR / "challenge_cron_tracking.json"
+# Shared across modes — the bot.vsBot.day rate-limit is per-account, not per-TC.
+COOLDOWN_FILE = SCRIPT_DIR / "challenge_cron_cooldown.json"
 LOG_FILE = SCRIPT_DIR / "lichess_bot_auto_logs" / f"challenge_cron_{MODE}.log"
+
+# Ratelimit keys that lock the whole account; honoring them avoids wasted API
+# calls until the window expires. Per-opponent / per-IP keys are not in here on
+# purpose — those should only abort the current run, not future ones.
+ACCOUNT_WIDE_RATELIMIT_KEYS = {"bot.vsBot.day"}
 
 # ---------------------------------------------------------------------------
 # Mode-specific constants
@@ -135,8 +142,32 @@ class RateLimited(Exception):
     """Raised when Lichess rejects a request with HTTP 429.
 
     Continuing to fire challenges in this state extends the throttle window —
-    the cron must abort the whole run, not just the current attempt.
+    the cron must abort the whole run, not just the current attempt. Carries
+    the parsed ``ratelimit.seconds`` / ``ratelimit.key`` from the response
+    body so the outer handler can persist a cooldown.
     """
+
+    def __init__(self, message: str, seconds: int | None = None, key: str | None = None):
+        super().__init__(message)
+        self.seconds = seconds
+        self.key = key
+
+
+def _parse_ratelimit(response: requests.Response) -> tuple[int | None, str | None]:
+    """Extract ``ratelimit.seconds`` / ``ratelimit.key`` from a Lichess 429 body."""
+    try:
+        body = response.json()
+    except ValueError:
+        return None, None
+    if not isinstance(body, dict):
+        return None, None
+    rl = body.get("ratelimit")
+    if not isinstance(rl, dict):
+        return None, None
+    seconds = rl.get("seconds")
+    key = rl.get("key")
+    return (seconds if isinstance(seconds, int) else None,
+            key if isinstance(key, str) else None)
 
 
 def create_challenge(opponent: str, clock_limit: int, clock_increment: int) -> dict:
@@ -149,7 +180,11 @@ def create_challenge(opponent: str, clock_limit: int, clock_increment: int) -> d
     }
     r = api_post(f"/api/challenge/{opponent}", data=payload)
     if r.status_code == 429:
-        raise RateLimited(f"HTTP 429 from /api/challenge/{opponent}: {r.text[:200]}")
+        seconds, key = _parse_ratelimit(r)
+        raise RateLimited(
+            f"HTTP 429 from /api/challenge/{opponent}: {r.text[:200]}",
+            seconds=seconds, key=key,
+        )
     try:
         body = r.json()
     except ValueError:
@@ -250,6 +285,44 @@ def pid_is_alive(pid: int) -> bool:
         return True
     except OSError:
         return False
+
+
+# ---------------------------------------------------------------------------
+# Cooldown (account-wide ratelimit memory)
+# ---------------------------------------------------------------------------
+def read_cooldown() -> datetime | None:
+    """Return the UTC datetime until which we must hold off, or None."""
+    if not COOLDOWN_FILE.exists():
+        return None
+    try:
+        with open(COOLDOWN_FILE) as f:
+            data = json.load(f)
+        until = datetime.fromisoformat(data["until"])
+    except (json.JSONDecodeError, OSError, KeyError, ValueError, TypeError):
+        return None
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=timezone.utc)
+    if until <= datetime.now(timezone.utc):
+        return None
+    return until
+
+
+def write_cooldown(seconds: int, key: str | None) -> datetime:
+    """Persist a cooldown lasting ``seconds`` from now. Returns the ``until`` dt."""
+    now = datetime.now(timezone.utc)
+    until = now + timedelta(seconds=seconds)
+    data = {
+        "until": until.isoformat(),
+        "key": key,
+        "seconds": seconds,
+        "set_at": now.isoformat(),
+        "set_by_mode": MODE,
+    }
+    tmp = COOLDOWN_FILE.with_suffix(".json.tmp")
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2)
+    tmp.replace(COOLDOWN_FILE)
+    return until
 
 
 def handle_previous_instance() -> bool:
@@ -419,6 +492,17 @@ def main() -> None:
     log.info("=" * 60)
     log.info("Challenge cron started (mode=%s, PID %d)", MODE, os.getpid())
 
+    cd_until = read_cooldown()
+    if cd_until is not None:
+        remaining = (cd_until - datetime.now(timezone.utc)).total_seconds()
+        log.info(
+            "Cooldown active until %s UTC (%dh %02dm remaining) — skipping run, no API calls.",
+            cd_until.isoformat(timespec="seconds"),
+            int(remaining) // 3600, (int(remaining) % 3600) // 60,
+        )
+        log.info("Challenge cron finished.")
+        return
+
     if not handle_previous_instance():
         sys.exit(0)
 
@@ -443,6 +527,14 @@ def main() -> None:
         run_tc(my_username, my_rating, clock_limit, clock_inc, tc_label)
     except RateLimited as e:
         log.warning("Aborting cron run — Lichess rate-limited the account: %s", e)
+        if e.seconds and e.key in ACCOUNT_WIDE_RATELIMIT_KEYS:
+            until = write_cooldown(e.seconds, e.key)
+            log.info(
+                "Account-wide cooldown recorded — skipping runs of both modes until %s UTC (key=%s, %ds).",
+                until.isoformat(timespec="seconds"), e.key, e.seconds,
+            )
+        elif e.seconds:
+            log.info("Rate-limit key '%s' is not account-wide — not recording a cooldown.", e.key)
 
     save_tc_index(tc_index)
     write_state("done")
