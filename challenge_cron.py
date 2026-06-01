@@ -2,7 +2,7 @@
 """Cron job: find an online Lichess bot, challenge it, track results.
 
 Modes:
-  rapid  — runs at X:45, challenges with 10+5 / 15+10 alternating per run
+  rapid  — runs at X:45, challenges with 10+5 / 13+5 alternating per run
   blitz  — runs at X:30, challenges with 3+0 / 5+0 alternating per run
 """
 
@@ -29,7 +29,7 @@ _parser.add_argument(
     "--mode",
     choices=["rapid", "blitz"],
     default="rapid",
-    help="Time-control mode: 'rapid' (10+5/15+10) or 'blitz' (3+0/5+0)",
+    help="Time-control mode: 'rapid' (10+5/13+5) or 'blitz' (3+0/5+0)",
 )
 args = _parser.parse_args()
 MODE = args.mode
@@ -59,7 +59,7 @@ if MODE == "rapid":
     CHALLENGE_WAIT = 55 * 60
     TC_OPTIONS = [
         (600, 5, "10+5"),
-        (900, 10, "15+10"),
+        (780, 5, "13+5"),
     ]
 else:  # blitz
     # Runs at X:30 — up to ~25 min until next run
