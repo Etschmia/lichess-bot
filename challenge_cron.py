@@ -378,18 +378,29 @@ def handle_previous_instance() -> bool:
 # ---------------------------------------------------------------------------
 # Choose opponent
 # ---------------------------------------------------------------------------
+CHESS960_MIN_GAMES = 10  # Lichess haelt eine Perf mit weniger Partien fuer "prov"
+CHESS960_START_RATING = 2000  # bewusst niedriger Startanker, bis sich die 960-Rating einpendelt
+
 def relevant_rating(perfs: dict) -> tuple[int, int]:
     """(rating, games) der fuer diesen Lauf relevanten Perf.
 
     standard  -> Perf des MODE (blitz/rapid).
-    chess960  -> chess960-Perf, sofern der Account dort schon Partien hat;
-                 sonst Fallback auf die MODE-Perf (sinnvolles Staerke-Proxy,
-                 solange noch keine 960-Historie existiert).
+    chess960  -> chess960-Perf, sofern sie nicht mehr provisorisch ist und
+                 genug Partien hat; sonst CHESS960_START_RATING als Anker
+                 (Lichess vergibt einer frischen/provisorischen Perf sonst
+                 eine bedeutungslose Platzhalter-Rating von 3000, die
+                 Martuni gegen Gegner setzt, die ihm 960-technisch noch
+                 ueberlegen sind).
     """
     if VARIANT == "chess960":
         p = perfs.get("chess960", {})
-        if p.get("games", 0) > 0 and p.get("rating", 0) > 0:
+        if (
+            p.get("games", 0) >= CHESS960_MIN_GAMES
+            and p.get("rating", 0) > 0
+            and not p.get("prov", False)
+        ):
             return p["rating"], p["games"]
+        return CHESS960_START_RATING, p.get("games", 0)
     p = perfs.get(MODE, {})
     return p.get("rating", 0), p.get("games", 0)
 
