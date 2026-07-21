@@ -31,8 +31,16 @@ _parser.add_argument(
     default="rapid",
     help="Time-control mode: 'rapid' (10+5/13+5) or 'blitz' (3+0/5+0)",
 )
+_parser.add_argument(
+    "--variant",
+    choices=["standard", "chess960"],
+    default="standard",
+    help="Variant to challenge with (chess960 games are rated under the "
+         "'chess960' perf on Lichess regardless of time control)",
+)
 args = _parser.parse_args()
 MODE = args.mode
+VARIANT = args.variant
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -85,7 +93,7 @@ logging.basicConfig(
         logging.StreamHandler(),
     ],
 )
-log = logging.getLogger(f"challenge_cron.{MODE}")
+log = logging.getLogger(f"challenge_cron.{MODE}.{VARIANT}")
 
 # ---------------------------------------------------------------------------
 # Config
@@ -176,7 +184,7 @@ def create_challenge(opponent: str, clock_limit: int, clock_increment: int) -> d
         "rated": "true",
         "clock.limit": str(clock_limit),
         "clock.increment": str(clock_increment),
-        "variant": "standard",
+        "variant": VARIANT,
     }
     r = api_post(f"/api/challenge/{opponent}", data=payload)
     if r.status_code == 429:
@@ -251,6 +259,7 @@ def record(category: str, opponent: str, time_control: str) -> None:
     entry = {
         "bot": opponent,
         "time_control": time_control,
+        "variant": VARIANT,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     tracking.setdefault(category, []).append(entry)
@@ -369,6 +378,23 @@ def handle_previous_instance() -> bool:
 # ---------------------------------------------------------------------------
 # Choose opponent
 # ---------------------------------------------------------------------------
+def relevant_rating(perfs: dict) -> tuple[int, int]:
+    """(rating, games) der fuer diesen Lauf relevanten Perf.
+
+    standard  -> Perf des MODE (blitz/rapid).
+    chess960  -> chess960-Perf, sofern der Account dort schon Partien hat;
+                 sonst Fallback auf die MODE-Perf (sinnvolles Staerke-Proxy,
+                 solange noch keine 960-Historie existiert).
+    """
+    if VARIANT == "chess960":
+        p = perfs.get("chess960", {})
+        if p.get("games", 0) > 0 and p.get("rating", 0) > 0:
+            return p["rating"], p["games"]
+    p = perfs.get(MODE, {})
+    return p.get("rating", 0), p.get("games", 0)
+
+
+
 def choose_opponent(my_username: str, my_rating: int,
                     exclude: set[str] | None = None) -> dict | None:
     """Pick a random online bot that accepts bot challenges and is within ±ELO_WINDOW of us."""
@@ -396,9 +422,7 @@ def choose_opponent(my_username: str, my_rating: int,
         if username.lower() in exclude:
             continue
         if my_rating > 0:
-            opp_perf = bot.get("perfs", {}).get(MODE, {})
-            opp_rating = opp_perf.get("rating", 0)
-            opp_games = opp_perf.get("games", 0)
+            opp_rating, opp_games = relevant_rating(bot.get("perfs", {}))
             if opp_games == 0 or opp_rating == 0 or abs(opp_rating - my_rating) > ELO_WINDOW:
                 skipped_rating += 1
                 continue
@@ -454,7 +478,7 @@ def run_tc(my_username: str, my_rating: int, clock_limit: int, clock_inc: int, t
 
         opponent = opponent_info["username"]
         tried_this_run.add(opponent.lower())
-        log.info("[%s] Attempt %d: challenging %s", tc_label, attempt, opponent)
+        log.info("[%s/%s] Attempt %d: challenging %s", tc_label, VARIANT, attempt, opponent)
 
         write_state("waiting", extra={"opponent": opponent, "time_control": tc_label})
         log.info("[%s] Waiting %ds before sending challenge...", tc_label, PRE_CHALLENGE_DELAY)
@@ -490,7 +514,7 @@ def run_tc(my_username: str, my_rating: int, clock_limit: int, clock_inc: int, t
 
 def main() -> None:
     log.info("=" * 60)
-    log.info("Challenge cron started (mode=%s, PID %d)", MODE, os.getpid())
+    log.info("Challenge cron started (mode=%s, variant=%s, PID %d)", MODE, VARIANT, os.getpid())
 
     cd_until = read_cooldown()
     if cd_until is not None:
@@ -516,8 +540,8 @@ def main() -> None:
 
     account = get_my_account()
     my_username = account["username"]
-    my_rating = account.get("perfs", {}).get(MODE, {}).get("rating", 0)
-    log.info("Bot account: %s (%s rating: %d)", my_username, MODE, my_rating)
+    my_rating, _ = relevant_rating(account.get("perfs", {}))
+    log.info("Bot account: %s (%s/%s rating: %d)", my_username, MODE, VARIANT, my_rating)
 
     tc_index = get_next_tc_index()
     clock_limit, clock_inc, tc_label = TC_OPTIONS[tc_index]
