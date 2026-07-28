@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Upstream `lichess-bot-devs/lichess-bot` — a Python bridge between the Lichess Bot API and a local chess engine. This checkout is operated as a **Martuni host**: `config.yml` is customized to launch the sibling project at `/home/librechat/enginemartuni` (Rust, UCI). Upstream defaults live in `config.yml.default` — diff against it before changing `config.yml`, and mirror upstream changes into Martuni-specific overrides rather than reverting them.
 
+Two configuration truths to keep straight: `config.yml` is the **live operator config** (contains the Lichess OAuth token, engine path, and Martuni-specific tweaks — treat it as secret). `config.yml.default` is the upstream template used both as documentation and as the schema `lib/config.py` validates against.
+
 ## Engine binding (Martuni)
 
 - Engine binary: `/home/librechat/enginemartuni/target/release/martuni` (built in the sibling Rust crate with `cargo build --release`). `engine.dir` + `engine.name` in `config.yml` point here.
@@ -47,23 +49,6 @@ ruff check --config test_bot/ruff.toml
 # Type check (CI runs --strict; keep it clean)
 mypy --strict .
 ```
-
-CI matrix runs Python 3.10 and 3.14 on Linux/macOS/Windows for tests and build; mypy runs on Windows only. Target floor is Python 3.10 (`ruff.toml` pins `target-version = "py310"`).
-
-## Architecture (big picture)
-
-Entry point `lichess-bot.py` is a two-line shim into `lib/lichess_bot.py::start_program`. Everything interesting lives under `lib/`:
-
-- **`lichess_bot.py`** — process orchestrator. Owns the main event loop, the multiprocessing `Pool` of game workers, the control/correspondence/logging/PGN queues, signal handling, auto-restart, and version/Python-deprecation checks driven by `lib/versioning.yml`. Dispatches incoming Lichess stream events to per-game workers.
-- **`lichess.py`** — thin HTTP client around the Lichess Bot API with `backoff` retry decorators. All network I/O funnels through here; `stop` is the shared shutdown flag.
-- **`model.py`** — dataclasses for `Game`, `Challenge`, `Player`, etc. These wrap the raw JSON event payloads typed in `lichess_types.py` (a `TypedDict` wall between untyped JSON and typed Python).
-- **`engine_wrapper.py`** — abstract engine interface plus concrete UCI / XBoard / Homemade adapters. Handles `go` command construction, time management (using `lib/timer.py`), draw/resign policy, polyglot books, lichess-side syzygy, and online move sources (chessdb, lichess cloud eval, opening explorer, online EGTB). This is where config from `engine:` in `config.yml` is consumed.
-- **`matchmaking.py`** — proactive challenger: picks opponents when the bot is idle, tracks recent matchups and block lists.
-- **`config.py`** — loads `config.yml`, validates it against the shape of `config.yml.default`, and exposes a `Configuration` wrapper that supports dotted access. Unknown keys are errors.
-- **`conversation.py`** — chat handling for in-game and spectator rooms; implements the `!help`/`!name`/etc. command protocol.
-- **`homemade.py`** (repo root, not `lib/`) — user-extensible Python engines selected via `protocol: homemade`. `extra_game_handlers.py` is the corresponding hook file for custom game-time logic.
-
-Two configuration truths to keep straight: `config.yml` is the **live operator config** (contains the Lichess OAuth token, engine path, and Martuni-specific tweaks — treat it as secret). `config.yml.default` is the upstream template used both as documentation and as the schema `lib/config.py` validates against.
 
 ## Tests
 
