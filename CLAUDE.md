@@ -12,8 +12,8 @@ Two configuration truths to keep straight: `config.yml` is the **live operator c
 
 - Engine binary: `/home/librechat/enginemartuni/target/release/martuni` (built in the sibling Rust crate with `cargo build --release`). `engine.dir` + `engine.name` in `config.yml` point here.
 - Protocol: `uci`. `ponder: true` — Martuni implements real pondering (open deadline on `go ponder`, TT-based pondermove).
-- `uci_options`: Martuni only supports `Hash`, `MoveOverhead`, `Ponder`. Do **not** add `Threads`, `SyzygyPath`, or `UCI_ShowWDL` — unimplemented, will warn at startup. `MoveOverhead` (no space in the name) is Martuni-internal; `move_overhead` at the top level is lichess-bot's separate network buffer and both apply.
-- Accepted play: `standard` variant only; `blitz`/`rapid`/`classical`. Bullet and correspondence are intentionally disabled (bullet too tight for current timing; correspondence by choice).
+- `uci_options`: The operator config sets `Hash` and `MoveOverhead`; Martuni also exposes `Ponder` and `SyzygyPath`. Do **not** add `Threads` or `UCI_ShowWDL` — they are unimplemented. `UCI_Chess960` and `UCI_Variant` are managed automatically by python-chess from the active game, so they must not be listed manually. `MoveOverhead` (no space in the name) is Martuni-internal; `move_overhead` at the top level is lichess-bot's separate network buffer and both apply.
+- Accepted play: `standard`, `chess960`, and `atomic`; bullet, blitz, rapid, and classical. Correspondence is intentionally disabled.
 - When Martuni gains or loses a UCI option / variant / time control, update `config.yml` here in the same change — the two repos are co-maintained.
 
 ## Runtime (systemd)
