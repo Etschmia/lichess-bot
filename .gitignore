@@ -21,3 +21,12 @@ challenge_manual_state.json
 martuni_bot_check.csv
 game_archiv/
 game_archiv_*.tar.gz
+
+# Local secrets (Voigtsbach host)
+token.env
+.env
+
+# Voigtsbach runtime on Grok-Bot host
+voigtsbach.lock
+voigtsbach.pid
+voigtsbach.log

@@ -101,7 +101,9 @@ log = logging.getLogger(f"challenge_cron.{MODE}.{VARIANT}")
 with open(CONFIG_PATH) as f:
     cfg = yaml.safe_load(f)
 
-TOKEN = cfg["token"]
+TOKEN = os.environ.get("LICHESS_BOT_TOKEN") or cfg["token"]
+if not TOKEN or TOKEN.startswith("HIER_") or set(TOKEN) <= set("x") or "xxx" in TOKEN.lower():
+    raise SystemExit("FEHLT: LICHESS_BOT_TOKEN (env) oder echtes token: in config.yml")
 BASE_URL = cfg.get("url", "https://lichess.org/")
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
 TIMEOUT = 10  # HTTP timeout in seconds
