@@ -21,3 +21,8 @@ challenge_manual_state.json
 martuni_bot_check.csv
 game_archiv/
 game_archiv_*.tar.gz
+
+# Laufzeit-Dateien des Variant-Sweeps (Skript, Gegnerliste und Tests sind versioniert)
+variant_challenge_sweep_state.json
+variant_challenge_sweep.lock
+variant_sweep_crontab_completion_backup.json

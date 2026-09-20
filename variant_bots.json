@@ -1,0 +1,132 @@
+[
+  {
+    "name": "VariantsBot",
+    "url": "https://lichess.org/@/VariantsBot",
+    "comment": "Alle Varianten, nur unge­wertet, 1+0 bis 20+10, auch gegen Bots. Gewertete Anfrage wird wahrscheinlich abgelehnt."
+  },
+  {
+    "name": "pawnrobot",
+    "url": "https://lichess.org/@/pawnrobot",
+    "comment": "Alle Varianten laut Profil; siehe öffentliche Profilbedingungen."
+  },
+  {
+    "name": "RaspFish",
+    "url": "https://lichess.org/@/RaspFish",
+    "comment": "Alle Varianten/Bedenkzeiten; eine Partie gleichzeitig."
+  },
+  {
+    "name": "SF_Bot1nok",
+    "url": "https://lichess.org/@/SF_Bot1nok",
+    "comment": "Alle Varianten laut Profil; siehe öffentliche Profilbedingungen."
+  },
+  {
+    "name": "Bot1nokk",
+    "url": "https://lichess.org/@/Bot1nokk",
+    "comment": "Alle Varianten laut Profil; siehe öffentliche Profilbedingungen."
+  },
+  {
+    "name": "bot1e",
+    "url": "https://lichess.org/@/bot1e",
+    "comment": "Alle Varianten laut Profil; siehe öffentliche Profilbedingungen."
+  },
+  {
+    "name": "StockfishLowDepth",
+    "url": "https://lichess.org/@/StockfishLowDepth",
+    "comment": "Alle Varianten/Bedenkzeiten; Suchtiefe 1."
+  },
+  {
+    "name": "Randmaster_Bot",
+    "url": "https://lichess.org/@/Randmaster_Bot",
+    "comment": "Alle Varianten, gewertet/ungewertet; Zufallszüge."
+  },
+  {
+    "name": "Martuni",
+    "url": "https://lichess.org/@/Martuni",
+    "comment": "Eigenes Konto, aus Challenge-Plan ausgeschlossen."
+  },
+  {
+    "name": "DarkOnBot",
+    "url": "https://lichess.org/@/DarkOnBot",
+    "comment": "Akzeptiert laut Profil beliebige Herausforderungen; alle fünf Varianten in Historie."
+  },
+  {
+    "name": "BubbleBot2",
+    "url": "https://lichess.org/@/BubbleBot2",
+    "comment": "Fairy-Stockfish 14 Level 2; Varianten allgemein beworben, alle fünf in Historie."
+  },
+  {
+    "name": "anti-bot",
+    "url": "https://lichess.org/@/anti-bot",
+    "comment": "Nur Räuberschach; ½+0 bis 180+180, gewertet/ungewertet."
+  },
+  {
+    "name": "CatNail",
+    "url": "https://lichess.org/@/CatNail",
+    "comment": "Nur Räuberschach; beliebige Bedenkzeiten; schwächer als NilatacBot."
+  },
+  {
+    "name": "NilatacBot",
+    "url": "https://lichess.org/@/NilatacBot",
+    "comment": "Nur Räuberschach; Eröffnungsbuch und Endspieldatenbanken."
+  },
+  {
+    "name": "puisne",
+    "url": "https://lichess.org/@/puisne",
+    "comment": "Unterstützt Räuberschach, nicht alle fünf bestätigt."
+  },
+  {
+    "name": "Randmaster_EGTB",
+    "url": "https://lichess.org/@/Randmaster_EGTB",
+    "comment": "Räuberschach; Zufallszüge plus Endspieldatenbank."
+  },
+  {
+    "name": "Bottios",
+    "url": "https://lichess.org/@/Bottios",
+    "comment": "Räuberschach und Three-Check laut Profil."
+  },
+  {
+    "name": "patzerbot135",
+    "url": "https://lichess.org/@/patzerbot135",
+    "comment": "King of the Hill; kein Fernschach."
+  },
+  {
+    "name": "OpeningsBot",
+    "url": "https://lichess.org/@/OpeningsBot",
+    "comment": "Alle fünf in Spielhistorie, aktuelle Annahme nicht eindeutig bestätigt."
+  },
+  {
+    "name": "NewChessEngine-ai",
+    "url": "https://lichess.org/@/NewChessEngine-ai",
+    "comment": "Alle fünf in Spielhistorie, aktuelle Annahme nicht eindeutig bestätigt."
+  },
+  {
+    "name": "abdcebot",
+    "url": "https://lichess.org/@/abdcebot",
+    "comment": "Alle fünf in Spielhistorie, aktuelle Annahme nicht eindeutig bestätigt."
+  },
+  {
+    "name": "is_BOSS",
+    "url": "https://lichess.org/@/is_BOSS",
+    "comment": "Alle fünf in Spielhistorie, aktuelle Annahme nicht eindeutig bestätigt."
+  },
+  {
+    "name": "MEGA-NOOB-BOT",
+    "url": "https://lichess.org/@/MEGA-NOOB-BOT",
+    "comment": "Alle fünf in Spielhistorie, aktuelle Annahme nicht eindeutig bestätigt."
+  },
+  {
+    "name": "colinbot",
+    "url": "https://lichess.org/@/colinbot",
+    "comment": "Alle fünf in Spielhistorie, aktuelle Annahme nicht eindeutig bestätigt."
+  },
+  {
+    "name": "CherryFish_Bot",
+    "url": "https://lichess.org/@/CherryFish_Bot",
+    "comment": "Alle fünf in Spielhistorie, aktuelle Annahme nicht eindeutig bestätigt."
+  },
+  {
+    "name": "chess_set_manager",
+    "url": "https://lichess.org/@/chess_set_manager",
+    "comment": "Alle fünf in Spielhistorie, aktuelle Annahme nicht eindeutig bestätigt."
+  }
+]
