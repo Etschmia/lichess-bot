@@ -498,11 +498,29 @@ def start_low_time_games(low_time_games: list[GameType], active_games: set[str],
         start_game_thread(active_games, game_id, play_game_args, pool)
 
 
+def next_challenge_index(challenge_queue: MULTIPROCESSING_LIST_TYPE, active_games: set[str]) -> int | None:
+    """
+    Find the challenge that may be accepted right now, or None if all of them have to wait.
+
+    Martuni-specific: only one game against bots is played at a time, so while any game is
+    running the queued bot challenges wait for it to finish. Humans are never kept waiting.
+    """
+    for index, chlng in enumerate(challenge_queue):
+        if not active_games or chlng.from_self or not chlng.challenger.is_bot:
+            return index
+    return None
+
+
 def accept_challenges(li: lichess.Lichess, challenge_queue: MULTIPROCESSING_LIST_TYPE, active_games: set[str],
                       max_games: int) -> None:
     """Accept a challenge."""
     while len(active_games) < max_games and challenge_queue:
-        chlng = challenge_queue.pop(0)
+        index = next_challenge_index(challenge_queue, active_games)
+        if index is None:
+            logger.debug(f"Game in progress: {len(challenge_queue)} bot challenge(s) wait for it to finish.")
+            break
+
+        chlng = challenge_queue.pop(index)
         if chlng.from_self:
             continue
 
@@ -635,6 +653,8 @@ def handle_challenge(event: EventType, li: lichess.Lichess, challenge_queue: MUL
                                                       user_profile)
     if is_supported:
         challenge_queue.append(chlng)
+        if active_games and chlng.challenger.is_bot:
+            logger.info(f"Queue {chlng}: bot challenge waits until the running game is over.")
         sort_challenges(challenge_queue, challenge_config)
         time_window = challenge_config.recent_bot_challenge_age
         if time_window is not None:

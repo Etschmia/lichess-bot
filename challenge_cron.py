@@ -542,12 +542,11 @@ def main() -> None:
         sys.exit(0)
 
     ongoing = get_my_ongoing_games()
-    if len(ongoing) >= 2:
+    if ongoing:
+        # Nur eine Partie gleichzeitig: keine ausgehende Challenge, solange gespielt wird.
         log.info("Bot has %d ongoing game(s) — exiting without challenging.", len(ongoing))
         write_state("done")
         sys.exit(0)
-    if ongoing:
-        log.info("Bot has 1 ongoing game — proceeding anyway.")
 
     account = get_my_account()
     my_username = account["username"]

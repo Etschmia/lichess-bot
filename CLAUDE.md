@@ -16,6 +16,10 @@ Two configuration truths to keep straight: `config.yml` is the **live operator c
 - Accepted play: `standard`, `chess960`, `atomic`, and `crazyhouse`; bullet, blitz, rapid, and classical. Correspondence is intentionally disabled.
 - When Martuni gains or loses a UCI option / variant / time control, update `config.yml` here in the same change — the two repos are co-maintained.
 
+## Nebenläufigkeit (lokale Abweichung vom Upstream)
+
+Es soll **nur eine Martuni-Instanz gleichzeitig** spielen. Dazu ist `accept_challenges` in `lib/lichess_bot.py` lokal gepatcht (`next_challenge_index`): solange eine Partie läuft, bleiben Bot-Challenges in der Queue und werden erst nach Partieende angenommen. Ausnahme sind **menschliche** Herausforderer (`challenge.challenger.is_bot == False`) — die werden sofort angenommen und dürfen das zweite Slot belegen, deshalb bleibt `challenge.concurrency` in `config.yml` bei 2. Gleiche Regel ausgehend: `challenge_cron.py` und `variant_challenge_sweep.py` brechen ab, sobald irgendeine Partie läuft. Der wöchentliche Upstream-Sync kann in dieser Funktion Konflikte erzeugen — den Patch dabei erhalten.
+
 ## Runtime (systemd)
 
 The bot runs as the system unit **`lichess-bot.service`** (`/etc/systemd/system/lichess-bot.service`, `User=librechat`, `WorkingDirectory=/home/librechat/lichess-bot`, `ExecStart=venv/bin/python lichess-bot.py`, `Restart=always`). Don't start a second instance by hand while debugging — stop the unit first or you will get duplicate Lichess sessions.
