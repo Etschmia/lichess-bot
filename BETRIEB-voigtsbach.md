@@ -119,17 +119,52 @@ fehlerfrei — kein 429, kein Reconnect, ESTABLISHED-Socket vom
 Control-Stream-Kindprozess. Der alte Host hatte den Token also weiterhin
 belegt oder dessen Quote verbraucht, obwohl er als abgeschaltet galt.
 
-**Lehre für die Diagnose:** `/api/user/<name>` ist als Indikator
-**unbrauchbar**. Das Feld `online` blieb auch dann leer, als der Stream
-nachweislich stand (ESTABLISHED-Socket, null Fehler im Log). Wer daraus
-schließt „niemand hält einen Stream, also kann kein Fremdsystem die Ursache
-sein“, liegt falsch — genau dieser Fehlschluss hat hier eine halbe Stunde
-gekostet. Verlässlich sind stattdessen:
+**Lehre für die Diagnose: den richtigen Endpunkt fragen.** Während des
+Vorfalls habe ich `/api/user/voigtsbach` abgefragt, dort blieb `online` leer
+— auch dann noch, als der Stream nachweislich stand. Daraus „das Feld ist
+unbrauchbar“ zu schließen war falsch: `/api/user/{}` ist in der Bridge
+`public_data` (`lib/lichess.py:471`) und trägt den Online-Status gar nicht.
+Die richtige Quelle ist `/api/users/status`:
 
 ```bash
-# Hält unser Prozess wirklich einen Stream?
+curl -s "https://lichess.org/api/users/status?ids=voigtsbach"
+# [{"name":"Voigtsbach","title":"BOT","id":"voigtsbach","online":true}]
+```
+
+Genau die nutzt auch die Bridge selbst in `is_online()`
+(`lib/lichess.py:466`). `/api/user/{}` wird im Code nirgends für den
+Online-Status ausgewertet.
+
+Der Fehlschluss, der hier eine halbe Stunde gekostet hat, war also nicht das
+Feld, sondern meine Folgerung daraus: „kein `online`, also hält niemand einen
+Stream, also kann kein Fremdsystem die Ursache sein.“ Der erste Halbsatz war
+schon nicht gemessen.
+
+Primärindikator bleibt trotzdem der lokale Socket — er misst die Verbindung
+selbst statt Lichess' Sicht darauf, und genau diese Differenz *war* der
+Vorfall:
+
+```bash
 sudo ss -tnp | grep 37.187.        # ESTAB vom Kindprozess = Stream steht
 journalctl -u lichess-bot-voigtsbach.service --since "-10min" | grep -cE "429|Control stream error"
+curl -s "https://lichess.org/api/users/status?ids=voigtsbach"   # zweite, unabhängige Quelle
+```
+
+### Watchdog: der Bot startet sich selbst neu
+
+`check_online_status()` (`lib/lichess_bot.py:542`, aufgerufen Zeile 450) prüft
+**stündlich** (`Timer(hours(1))`) über `is_online()`, ob Lichess den Account
+als online sieht, und setzt bei `false` `stop.restart = True` — im Log
+sichtbar als `Will restart lichess-bot`.
+
+Bei einer Sperre wie oben ist das ein Verstärker: Der Stream kommt nicht
+hoch, Lichess sieht den Account offline, der Watchdog startet neu, der
+Neustart ist ein neuer Stream-Versuch, der wieder 429 bekommt. Am 21.09. hat
+er nicht mitgemischt (null Treffer, die Sperre dauerte unter einer Stunde),
+aber bei einer mehrstündigen Sperre wäre er relevant. Prüfen mit:
+
+```bash
+journalctl -u lichess-bot-voigtsbach.service --since "-24h" | grep -c "Will restart lichess-bot"
 ```
 
 Auch `seenAt` trägt wenig: es wird von **jedem** authentifizierten Call
@@ -239,10 +274,19 @@ Prüfung, ob sonst jemand mit dem Token verbunden ist:
 curl -s https://lichess.org/api/user/voigtsbach | grep -o '"online":[a-z]*'
 ```
 
-**Achtung:** Dieser Check taugt nichts — siehe Abschnitt 5, `online` blieb
-auch bei stehendem Stream leer. Am 21.09.2026 lief auf dem Grok-Host trotz
-„abgeschaltet“ noch etwas mit diesem Token und blockierte den Betrieb hier
-knapp 30 Minuten lang, bis dort alles gelöscht wurde. Verlässlich ist nur,
+**Achtung, falscher Endpunkt:** `/api/user/{}` trägt den Online-Status nicht.
+Richtig ist:
+
+```bash
+curl -s "https://lichess.org/api/users/status?ids=voigtsbach"
+```
+
+Bei gestopptem Dienst hier muss das `"online":false` bzw. kein `online`
+liefern. Meldet es `true`, benutzt ein anderer Host den Token.
+
+Verlass dich darauf aber nicht allein: Am 21.09.2026 lief auf dem Grok-Host
+trotz „abgeschaltet“ noch etwas mit diesem Token und blockierte den Betrieb
+hier knapp 30 Minuten lang, bis dort alles gelöscht wurde. Sicher ist nur,
 auf dem anderen Host selbst nachzusehen.
 
 ---
