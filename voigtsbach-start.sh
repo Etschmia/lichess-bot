@@ -12,11 +12,11 @@ if [ -z "${LICHESS_BOT_TOKEN:-}" ]; then
     # shellcheck disable=SC1091
     source "$ROOT/token.env"
     set +a
-  elif [ -f /workspace/.env ]; then
+  elif [ -f "$ROOT/../.env" ]; then
     # Fallback: map LICHESS_API_KEY -> LICHESS_BOT_TOKEN without printing
     set -a
     # shellcheck disable=SC1091
-    source /workspace/.env
+    source "$ROOT/../.env"
     set +a
     if [ -n "${LICHESS_API_KEY:-}" ]; then
       export LICHESS_BOT_TOKEN="$LICHESS_API_KEY"
@@ -26,11 +26,11 @@ if [ -z "${LICHESS_BOT_TOKEN:-}" ]; then
 fi
 
 if [ -z "${LICHESS_BOT_TOKEN:-}" ]; then
-  echo "FEHLT: LICHESS_BOT_TOKEN (set env or create token.env from /workspace/.env)." >&2
+  echo "FEHLT: LICHESS_BOT_TOKEN (set env or create token.env from ../.env)." >&2
   exit 1
 fi
 
-ENGINE="/workspace/sparkengine/target/release/funken"
+ENGINE="${FUNKEN_BIN:-$ROOT/../sparkengine/target/release/funken}"
 [ -x "$ENGINE" ] || { echo "FEHLT: $ENGINE — build sparkengine first."; exit 1; }
 [ -f "$ROOT/config.yml" ] || { echo "FEHLT: $ROOT/config.yml"; exit 1; }
 [ -x "$ROOT/venv/bin/python" ] || { echo "FEHLT: venv — run python3 -m venv venv && venv/bin/pip install -r requirements.txt"; exit 1; }

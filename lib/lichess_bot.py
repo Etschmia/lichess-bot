@@ -114,9 +114,12 @@ def upgrade_account(li: lichess.Lichess) -> bool:
 
 def watch_control_stream(control_queue: CONTROL_QUEUE_TYPE, li: lichess.Lichess) -> None:
     """Put the events in a queue."""
+    rate_limit_strikes = 0
+    control_stream_backoff_max = 300.0
     while not stop.terminated:
         try:
             with li.get_event_stream() as response:
+                rate_limit_strikes = 0
                 lines = response.iter_lines()
                 for line in lines:
                     if line:
@@ -124,6 +127,26 @@ def watch_control_stream(control_queue: CONTROL_QUEUE_TYPE, li: lichess.Lichess)
                         control_queue.put_nowait(event)
                     else:
                         control_queue.put_nowait({"type": "ping"})
+        except lichess.RateLimitedError as e:
+            if stop.terminated:
+                break
+            # api_get() gates each endpoint client-side for 60s after a 429
+            # (lib/lichess.py: set_rate_limit_delay / get_path_template), so a
+            # short retry interval sends no traffic and is harmless for the
+            # usual one-minute episode. It does keep one real request per
+            # minute going during a *prolonged* server-side block, though, so
+            # stretch the interval over consecutive strikes. Never shorter
+            # than the cooldown the client itself reports.
+            rate_limit_strikes += 1
+            wait = max(to_seconds(e.timeout),
+                       min(control_stream_backoff_max, 60.0 * 2 ** (rate_limit_strikes - 1)))
+            logger.warning(f"{e} Backing off {round(wait)}s (strike {rate_limit_strikes}).")
+            # Poll stop.terminated so shutdown stays responsive.
+            for _ in range(max(1, math.ceil(wait))):
+                if stop.terminated:
+                    break
+                time.sleep(1)
+            continue
         except Exception:
             if stop.terminated:
                 break

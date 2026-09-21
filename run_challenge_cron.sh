@@ -10,10 +10,10 @@ if [ -z "${LICHESS_BOT_TOKEN:-}" ]; then
     # shellcheck disable=SC1091
     source "$ROOT/token.env"
     set +a
-  elif [ -f /workspace/.env ]; then
+  elif [ -f "$ROOT/../.env" ]; then
     set -a
     # shellcheck disable=SC1091
-    source /workspace/.env
+    source "$ROOT/../.env"
     set +a
     export LICHESS_BOT_TOKEN="${LICHESS_API_KEY:-}"
     unset LICHESS_API_KEY || true
