@@ -157,11 +157,20 @@ curl -s "https://lichess.org/api/users/status?ids=voigtsbach"   # zweite, unabh�
 als online sieht, und setzt bei `false` `stop.restart = True` — im Log
 sichtbar als `Will restart lichess-bot`.
 
-Bei einer Sperre wie oben ist das ein Verstärker: Der Stream kommt nicht
+Bei einer **Stream**-Sperre ist das ein Verstärker: Der Stream kommt nicht
 hoch, Lichess sieht den Account offline, der Watchdog startet neu, der
 Neustart ist ein neuer Stream-Versuch, der wieder 429 bekommt. Am 21.09. hat
-er nicht mitgemischt (null Treffer, die Sperre dauerte unter einer Stunde),
-aber bei einer mehrstündigen Sperre wäre er relevant. Prüfen mit:
+er nicht mitgemischt (null Treffer, die Sperre dauerte unter einer Stunde) —
+bei einer mehrstündigen Stream-Sperre käme pro Stunde ein zusätzlicher
+Versuch dazu.
+
+**Nicht übertragen auf eine Challenge-Sperre** (wie die 5h45/5h15 im Anhang):
+Dort ist nur `/api/challenge/{}` dicht, der Event-Stream steht weiter, Lichess
+sieht den Account als online, und `is_online()` liefert `true` — die Bedingung
+des Watchdogs ist nie erfüllt, er schlägt gar nicht an. Die beiden Fälle
+sehen im Journal ähnlich aus, haben hier aber nichts miteinander zu tun.
+
+Prüfen mit:
 
 ```bash
 journalctl -u lichess-bot-voigtsbach.service --since "-24h" | grep -c "Will restart lichess-bot"
@@ -301,6 +310,9 @@ Auskunft der Martuni-Session, zum Einordnen, was „normal“ ist:
   Der Engpass liegt vollständig im *ersten* Verbindungsaufbau.
 - 429-Episoden auf `/api/stream/event`: ~alle 2,7 Tage, Dauer **immer ~60 s**.
   Eine Dauersperre wie hier am 21.09. ist dort nie aufgetreten.
+- Watchdog-Neustarts (`Will restart lichess-bot`): null — allerdings nur für
+  den Zeitraum 20.08.–21.09.2026 belegt, weiter zurück reichen die Logs
+  dort nicht. Für die April-Episoden unten ist es nicht feststellbar.
 - Ein 429 unmittelbar nach Prozessstart ist auch dort bekannt und folgenlos.
 - `move_overhead: 1000` (Bridge) + `MoveOverhead: 100` (Engine, dort ohne
   Leerzeichen im Namen): in 955 Partien aus zehn Tagen (11.–21.09.2026)
