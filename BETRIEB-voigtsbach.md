@@ -104,52 +104,58 @@ klingen **immer nach ~60 s** ab (Auskunft der Martuni-Session, 21.09.2026,
 12 Episoden über 32 Tage). Ein 429 direkt nach Prozessstart ist dort ebenfalls
 bekannt und folgenlos.
 
-### Dauersperre (Vorfall 21.09.2026, offen)
+### Dauersperre (Vorfall 21.09.2026, GELÖST)
 
 Davon zu unterscheiden ist eine **anhaltende** Sperre. Am 21.09.2026 lieferte
-`/api/stream/event` für den Voigtsbach-Token über mehr als 25 Minuten
-durchgehend 429 — auch bei gestopptem Dienst und einer einzelnen, sauber
-gestreamten `curl`-Verbindung nach 90 s Ruhe. Es lag also weder an der
-Reconnect-Frequenz noch an einer zweiten Instanz:
+`/api/stream/event` für den Voigtsbach-Token von 15:50 bis 16:19 durchgehend
+429 — betroffen war der echte Bridge-Client (6 Treffer `HTTPError: 429` aus
+`lib/lichess.py`, also mit korrektem `User-Agent` und `stream=True`), nicht
+nur manuelle `curl`-Tests. Acht Minuten mit vollständig gestopptem Dienst
+und keinem einzigen Stream-Request reichten nicht.
 
-- kein zweiter Prozess auf dem Host, nur ein Aufrufer von `get_event_stream()`
-  (`lib/lichess_bot.py:121`, im Kindprozess)
-- `https://lichess.org/api/user/voigtsbach` meldete kein `online`
-- `/api/account` und `/api/account/playing` antworteten normal mit 200
-- der allererste Stream-Versuch dieser Sitzung (15:50) bekam sofort 429
-- betroffen ist der **echte Bridge-Client** (6 Treffer `HTTPError: 429` aus
-  `lib/lichess.py`), also mit korrektem `User-Agent`
-  (`lichess-bot/… user:Voigtsbach`), `timeout=(15, 20)` und `stream=True` —
-  nicht nur die `curl`-Kontrollen
-- acht Minuten mit vollständig gestopptem Dienst und *keinem einzigen*
-  Stream-Request reichten nicht: der erste Versuch danach war wieder 429
+**Ursache: der alte Grok-Host.** Nachdem Tobias dort um ~16:20 alles gelöscht
+hatte, verband sich der Bot beim nächsten Start um 16:21:05 sofort und
+fehlerfrei — kein 429, kein Reconnect, ESTABLISHED-Socket vom
+Control-Stream-Kindprozess. Der alte Host hatte den Token also weiterhin
+belegt oder dessen Quote verbraucht, obwohl er als abgeschaltet galt.
 
-**Was ausgeschlossen ist:** eine zweite Stream-Verbindung. `/api/user/voigtsbach`
-meldet kein `online`, und bei Bot-Accounts hängt der Online-Status an genau
-einer bestehenden Event-Stream-Verbindung. Es hält also niemand einen Stream,
-auch nicht der alte Grok-Host.
+**Lehre für die Diagnose:** `/api/user/<name>` ist als Indikator
+**unbrauchbar**. Das Feld `online` blieb auch dann leer, als der Stream
+nachweislich stand (ESTABLISHED-Socket, null Fehler im Log). Wer daraus
+schließt „niemand hält einen Stream, also kann kein Fremdsystem die Ursache
+sein“, liegt falsch — genau dieser Fehlschluss hat hier eine halbe Stunde
+gekostet. Verlässlich sind stattdessen:
 
-**Was ausdrücklich nicht belegt ist:** die Ursache. Der `seenAt`-Zeitstempel
-15:41 taugt nicht als Indiz für Fremdnutzung — `.env` wurde um 15:40:52
-angelegt, neun Sekunden davor, das war also mit hoher Wahrscheinlichkeit das
-Erzeugen und Testen des Tokens. `seenAt` wird zudem von jedem
-authentifizierten Call aktualisiert, nicht nur von Streams.
+```bash
+# Hält unser Prozess wirklich einen Stream?
+sudo ss -tnp | grep 37.187.        # ESTAB vom Kindprozess = Stream steht
+journalctl -u lichess-bot-voigtsbach.service --since "-10min" | grep -cE "429|Control stream error"
+```
 
-Übrig bleibt eine serverseitig hinterlegte Sperre ohne aktiven Stream. Dafür
-gibt es keinen positiven Beleg, nur die Abwesenheit anderer Erklärungen.
-Offen ist insbesondere, **woran** sie hängt — Lichess limitiert auch per IP,
-und dieser Entwicklungshost ist als Träger mindestens so plausibel wie der
-Token:
+Auch `seenAt` trägt wenig: es wird von **jedem** authentifizierten Call
+aktualisiert, nicht nur von Streams, und war hier schlicht der Zeitstempel
+der Token-Erzeugung (`.env` 15:40:52, `seenAt` 15:41:01).
+
+**Wenn es wieder auftritt:** zuerst prüfen, ob irgendein anderer Host den
+Token benutzt — das ist nach diesem Vorfall die mit Abstand wahrscheinlichste
+Ursache. Erst danach an Quoten denken. Zur Größenordnung: auf dem
+Martuni-Host dauerten zwei Sperren des *Challenge*-Endpunkts 5 h 45 min bzw.
+5 h 15 min, und zwar **obwohl** durchgehend weiter angefragt wurde
+(~40 abgewiesene Requests/h über 14 Cron-Läufe). Das spricht für ein
+zeitbasiertes Quotenfenster, nicht für „solange du klopfst, bleibt zu“ —
+Funkstille ist also nicht der Wirkmechanismus, Geduld schon. Anderer
+Endpunkt, andere Quote: als Größenordnung nehmen, nicht als Messwert.
+
+Falls sich kein Fremdnutzer findet und die Sperre bleibt, trennt diese Matrix
+tokengebunden von hostgebunden (Lichess limitiert auch per IP):
 
 |                  | alter Token | frischer Token |
 |------------------|-------------|----------------|
-| SYR-PE-BUTDEV    | gesperrt    | ungetestet     |
+| SYR-PE-BUTDEV    | gemessen    | ungetestet     |
 | andere IP        | ungetestet  | ungetestet     |
 
-Nur das erste Feld ist gemessen. **Nächste Schritte:** ein frisches
-OAuth-Token (Scope `bot:play`) beantwortet die halbe Frage sofort und ist
-billig; ein Versuch über eine andere IP (notfalls Handy-Hotspot) trennt die
-Zeilen. Beides braucht Tobias.
+Ein frisches OAuth-Token (Scope `bot:play`) ist billig und beantwortet die
+halbe Frage; „andere IP“ reicht notfalls als Handy-Hotspot.
 
 ### Regeln
 
@@ -233,7 +239,11 @@ Prüfung, ob sonst jemand mit dem Token verbunden ist:
 curl -s https://lichess.org/api/user/voigtsbach | grep -o '"online":[a-z]*'
 ```
 
-Bei gestopptem Dienst hier muss das `online:false` bzw. kein Feld liefern.
+**Achtung:** Dieser Check taugt nichts — siehe Abschnitt 5, `online` blieb
+auch bei stehendem Stream leer. Am 21.09.2026 lief auf dem Grok-Host trotz
+„abgeschaltet“ noch etwas mit diesem Token und blockierte den Betrieb hier
+knapp 30 Minuten lang, bis dort alles gelöscht wurde. Verlässlich ist nur,
+auf dem anderen Host selbst nachzusehen.
 
 ---
 
@@ -249,9 +259,10 @@ Auskunft der Martuni-Session, zum Einordnen, was „normal“ ist:
   Eine Dauersperre wie hier am 21.09. ist dort nie aufgetreten.
 - Ein 429 unmittelbar nach Prozessstart ist auch dort bekannt und folgenlos.
 - `move_overhead: 1000` (Bridge) + `MoveOverhead: 100` (Engine, dort ohne
-  Leerzeichen im Namen): in 952 Partien **15 Zeitüberschreitungen, alle beim
-  Gegner**, keine einzige bei Martuni — bis hinunter zu 60+0 und 30+0.
-  Einschränkung: dort 2 Kerne mit `concurrency: 2`.
+  Leerzeichen im Namen): in 955 Partien aus zehn Tagen (11.–21.09.2026)
+  **15 Zeitüberschreitungen, alle beim Gegner**, keine einzige bei Martuni —
+  bis hinunter zu 60+0 und 30+0. Einschränkung: dort 2 Kerne mit
+  `concurrency: 2`, und es ist ein 10-Tage-Fenster, nicht die Gesamthistorie.
 - Martunis Unit setzt kein `KillSignal`, schickt also SIGTERM, obwohl im Bot
   nur SIGINT verdrahtet ist — der Prozess geht dort hart runter. Deshalb hier
   `KillSignal=SIGINT`. Achtung: ein **zweites** SIGINT beendet sofort
