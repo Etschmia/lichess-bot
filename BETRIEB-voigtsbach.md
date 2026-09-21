@@ -88,6 +88,11 @@ sudo systemd-run --quiet --wait --collect --pipe \
 Wer `ReadWritePaths` ändert oder `pgn_directory` aus dem Bridge-Verzeichnis
 heraus verlegt, muss das erneut prüfen — sonst schreibt der Bot still nichts.
 
+**Verifiziert am 21.09.2026** durch die ersten beiden Partien: Beide PGNs
+liegen in `game_records/` im erwarteten Format `Weiß vs Schwarz - GameId.pgn`
+und sind mit `chess.pgn.read_game()` fehlerfrei parsebar. Die Härtung
+blockiert das Schreiben also nicht.
+
 `KillSignal=SIGINT`, weil die Bridge nur SIGINT sauber behandelt
 (`lib/lichess_bot.py`, `signal.signal(signal.SIGINT, …)`). Zusammen mit
 `quit_after_all_games_finish: true` spielt sie eine laufende Partie noch zu
@@ -181,7 +186,15 @@ Vorfall:
 
 ```bash
 sudo ss -tnp | grep 37.187.        # ESTAB vom Kindprozess = Stream steht
-journalctl -u lichess-bot-voigtsbach.service --since "-10min" | grep -cE "429|Control stream error"
+journalctl -u lichess-bot-voigtsbach.service --since "-10min" | grep -cE "HTTPError: 429|Control stream error"
+```
+
+Das Muster muss `HTTPError: 429` lauten, nicht nur `429`: Der Bot loggt im
+Spiel Zeilen wie `Searching for wtime 564290`, und ein blosses `429` trifft
+mitten in solche Zahlen. Genau das hat hier am 21.09. einen Fehlalarm erzeugt
+— sieben vermeintliche Fehler, davon sechs alte und einer frei erfunden.
+
+```bash
 curl -s "https://lichess.org/api/users/status?ids=voigtsbach"   # zweite, unabhängige Quelle
 ```
 
