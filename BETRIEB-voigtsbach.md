@@ -53,6 +53,41 @@ journalctl -u lichess-bot-voigtsbach.service -f
 Erwarteter Start-Log: `Engine configuration OK` → `Welcome Voigtsbach!` →
 `awaiting challenges.`
 
+### PGN-Archiv und die Härtung
+
+`pgn_directory` und `pgn_file_grouping` müssen in `config.yml` **aktiv** sein —
+in `config.yml.default` sind beide auskommentiert. Fehlen sie, steigt der Code
+still aus (`lib/lichess_bot.py:1046` und `:1182`, jeweils
+`if not config.pgn_directory`): kein Fehler, keine Warnung, keine Datei. Der
+Bot spielt dabei völlig normal. Prüfen:
+
+```bash
+grep -nE "^pgn_directory|^pgn_file_grouping" config.yml
+venv/bin/python -c "import sys;sys.path.insert(0,'.');from lib.config import load_config;print(load_config('config.yml').pgn_directory)"
+```
+
+Der Pfad ist relativ zum `WorkingDirectory` der Unit; anlegen muss man ihn
+nicht (`os.makedirs(..., exist_ok=True)`, Zeile 1190). Bei
+`pgn_file_grouping: "game"` entsteht eine Datei pro Partie
+(`Weiß vs Schwarz - GameId.pgn`).
+
+**Host-spezifisch:** Diese Unit läuft mit `ProtectSystem=strict`, das
+Dateisystem ist also bis auf `ReadWritePaths` schreibgeschützt.
+`game_records/` liegt darunter — geprüft mit einem Testschreibvorgang unter
+denselben Sandbox-Eigenschaften:
+
+```bash
+sudo systemd-run --quiet --wait --collect --pipe \
+  --property=User=but2developer --property=Group=www-data \
+  --property=WorkingDirectory=/var/www/but2/botdir/lichess-bot \
+  --property=ProtectSystem=strict \
+  --property=ReadWritePaths=/var/www/but2/botdir/lichess-bot \
+  /bin/bash -c 'touch game_records/.probe && rm game_records/.probe && echo OK'
+```
+
+Wer `ReadWritePaths` ändert oder `pgn_directory` aus dem Bridge-Verzeichnis
+heraus verlegt, muss das erneut prüfen — sonst schreibt der Bot still nichts.
+
 `KillSignal=SIGINT`, weil die Bridge nur SIGINT sauber behandelt
 (`lib/lichess_bot.py`, `signal.signal(signal.SIGINT, …)`). Zusammen mit
 `quit_after_all_games_finish: true` spielt sie eine laufende Partie noch zu
