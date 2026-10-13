@@ -3,15 +3,16 @@
 # Bei Merge-Konflikt → Benachrichtigungs-Mail via Resend.
 set -uo pipefail
 
-REPO=/home/librechat/lichess-bot
+REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SERVICE="${LICHESS_BOT_SERVICE:-lichess-bot-martuni.service}"
 LOGFILE="$REPO/lichess_bot_auto_logs/upstream-sync.log"
-RESEND_ENV=/home/librechat/pgn-db/server/.env.local
+RESEND_ENV="${RESEND_ENV:-$REPO/resend.env}"
 NOTIFY_TO="brendler@syrcon.com"
 
 mkdir -p "$(dirname "$LOGFILE")"
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') [upstream-sync] $*" | tee -a "$LOGFILE"; }
 
-# Resend-Key aus pgn-db .env.local
+# Resend-Key aus $RESEND_ENV (Zeile RESEND_API_KEY=...)
 RESEND_API_KEY=""
 [[ -f "$RESEND_ENV" ]] && RESEND_API_KEY=$(grep '^RESEND_API_KEY=' "$RESEND_ENV" | cut -d= -f2- | tr -d '"'"'")
 
@@ -85,14 +86,14 @@ if git merge --no-ff --no-edit upstream/master > "$MERGE_TMP" 2>&1; then
     log "Push zu origin (Etschmia/lichess-bot) erfolgreich."
 
     # Graceful Bot-Neustart
-    TOKEN=$(python3 -c "import yaml; print(yaml.safe_load(open('config.yml'))['token'])")
+    TOKEN=$("$REPO/venv/bin/python" -c "import yaml; print(yaml.safe_load(open('config.yml'))['token'])")
     while true; do
         PLAYING=$(curl -sf -H "Authorization: Bearer $TOKEN" \
             https://lichess.org/api/account/playing \
             | python3 -c "import json,sys; print(len(json.load(sys.stdin)['nowPlaying']))")
         if [[ "$PLAYING" -eq 0 ]]; then
-            log "Kein Spiel aktiv — starte lichess-bot.service neu."
-            sudo systemctl restart lichess-bot.service
+            log "Kein Spiel aktiv — starte $SERVICE neu."
+            sudo -n systemctl restart "$SERVICE"
             log "Neustart abgeschlossen."
             break
         fi
@@ -124,7 +125,7 @@ Manuell lösen:
   git add <datei>
   git commit
   git push origin master
-  sudo systemctl restart lichess-bot.service
+  sudo systemctl restart $SERVICE
 EOF
 
     send_conflict_mail "ToDo: Merge-Konflikt lichess-bot upstream-sync" "$MAIL_BODY"
