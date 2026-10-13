@@ -18,7 +18,7 @@ Two configuration truths to keep straight: `config.yml` is the **live operator c
 
 ## Nebenläufigkeit (lokale Abweichung vom Upstream)
 
-Es soll **nur eine Martuni-Instanz gleichzeitig** spielen. Dazu ist `accept_challenges` in `lib/lichess_bot.py` lokal gepatcht (`next_challenge_index`): solange eine Partie läuft, bleiben Bot-Challenges in der Queue und werden erst nach Partieende angenommen. Ausnahme sind **menschliche** Herausforderer (`challenge.challenger.is_bot == False`) — die werden sofort angenommen und dürfen das zweite Slot belegen, deshalb bleibt `challenge.concurrency` in `config.yml` bei 2. Gleiche Regel ausgehend: `challenge_cron.py` und `variant_challenge_sweep.py` brechen ab, sobald irgendeine Partie läuft. Der wöchentliche Upstream-Sync kann in dieser Funktion Konflikte erzeugen — den Patch dabei erhalten.
+Höchstens **eine Bot-Partie gleichzeitig**, der zweite Slot bleibt Menschen: seit 13.10.2026 über das Upstream-Feature `challenge.games_reserved_for_humans: 1` plus `challenge.preference: "human"` in `config.yml` (bei `concurrency: 2`). Das ersetzt den früheren lokalen Patch `next_challenge_index` (c4200bd). Unterschied: Eine Bot-Partie darf neben einer laufenden Menschen-Partie starten. Ausgehend gilt weiter die strengere Regel: `challenge_cron.py` und `variant_challenge_sweep.py` brechen ab, sobald irgendeine Partie läuft.
 
 ## Runtime (systemd)
 
