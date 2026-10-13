@@ -7,7 +7,7 @@ REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SERVICE="${LICHESS_BOT_SERVICE:-lichess-bot-martuni.service}"
 LOGFILE="$REPO/lichess_bot_auto_logs/upstream-sync.log"
 RESEND_ENV="${RESEND_ENV:-$REPO/resend.env}"
-NOTIFY_TO="brendler@syrcon.com"
+NOTIFY_TO="${NOTIFY_TO:-tbrendler@gmail.com}"
 
 mkdir -p "$(dirname "$LOGFILE")"
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') [upstream-sync] $*" | tee -a "$LOGFILE"; }
@@ -36,7 +36,7 @@ payload = json.dumps({
 req = urllib.request.Request(
     'https://api.resend.com/emails',
     data=payload,
-    headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'},
+    headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json', 'User-Agent': 'lichess-bot-upstream-sync'},
     method='POST'
 )
 try:
