@@ -1,0 +1,190 @@
+"""Test that each game is played by one `play_game` process and that a dropped game stream is reopened."""
+import json
+from collections.abc import Callable, Generator
+from typing import cast
+from requests.exceptions import HTTPError
+from lib import lichess, lichess_bot, model
+from lib.timer import Timer, seconds
+from lib.lichess_bot import POOL_TYPE, PlayGameArgsType
+
+# ruff: noqa: ARG002
+
+
+class FakePool:
+    """Records the games that would be started."""
+
+    def __init__(self) -> None:
+        """Start with no games."""
+        self.started: list[str] = []
+
+    def apply_async(self, func: Callable[..., None], kwds: PlayGameArgsType,
+                    error_callback: Callable[[BaseException], None]) -> None:
+        """Record the game instead of playing it."""
+        self.started.append(kwds["game_id"])
+
+
+def start(game_id: str, active_games: dict[str, str], games_in_progress: set[str], pool: FakePool) -> None:
+    """Start a game the way the main loop does."""
+    lichess_bot.start_game_thread(active_games, game_id, "opponent", cast(PlayGameArgsType, {}),
+                                  cast(POOL_TYPE, pool), games_in_progress)
+
+
+def test_repeated_game_start_is_ignored() -> None:
+    """A second `gameStart` for a game that is already being played must not start another process."""
+    active_games: dict[str, str] = {}
+    games_in_progress: set[str] = set()
+    pool = FakePool()
+
+    start("abcdefgh", active_games, games_in_progress, pool)
+    start("abcdefgh", active_games, games_in_progress, pool)
+
+    assert pool.started == ["abcdefgh"]
+    assert active_games == {"abcdefgh": "opponent"}
+    assert games_in_progress == {"abcdefgh"}
+
+
+def test_accepted_challenge_is_started() -> None:
+    """An accepted challenge is in `active_games` before its `gameStart`, and must still be started."""
+    active_games = {"abcdefgh": "opponent"}
+    games_in_progress: set[str] = set()
+    pool = FakePool()
+
+    start("abcdefgh", active_games, games_in_progress, pool)
+
+    assert pool.started == ["abcdefgh"]
+
+
+class FakeGameStream:
+    """A game stream with fixed lines."""
+
+    def __init__(self, lines: list[bytes]) -> None:
+        """Store the lines."""
+        self.lines = lines
+        self.closed = False
+
+    def iter_lines(self) -> Generator[bytes, None, None]:
+        """Send the lines."""
+        yield from self.lines
+
+    def __enter__(self) -> "FakeGameStream":  # noqa: PYI034
+        """Enter the stream context."""
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        """Close the stream."""
+        self.closed = True
+
+
+class FakeLichess:
+    """Opens fake game streams."""
+
+    def __init__(self, lines: list[bytes]) -> None:
+        """Store the lines of the next game stream."""
+        self.lines = lines
+        self.streams: list[FakeGameStream] = []
+
+    @property
+    def streams_opened(self) -> int:
+        """The number of game streams opened."""
+        return len(self.streams)
+
+    def get_game_stream(self, game_id: str) -> FakeGameStream:
+        """Open a game stream."""
+        self.streams.append(FakeGameStream(self.lines))
+        return self.streams[-1]
+
+
+def test_reconnect_game_stream_starts_with_current_state() -> None:
+    """The reopened stream is opened lazily and starts with the game state from the new full game info."""
+    state = {"type": "gameState", "moves": "e2e4 e7e5", "status": "started"}
+    next_state = b'{"type": "gameState", "moves": "e2e4 e7e5 g1f3", "status": "started"}'
+    li = FakeLichess([json.dumps({"type": "gameFull", "state": state}).encode("utf-8"), next_state])
+
+    stream = lichess_bot.reconnect_game_stream(cast(lichess.Lichess, li), "abcdefgh")
+    assert li.streams_opened == 0
+    assert [json.loads(line) for line in stream] == [state, json.loads(next_state)]
+    assert li.streams_opened == 1
+    assert li.streams[0].closed
+
+
+def test_reconnect_game_stream_that_ends_at_once() -> None:
+    """A reopened stream that ends before sending the full game info ends without an error."""
+    li = FakeLichess([])
+
+    assert list(lichess_bot.reconnect_game_stream(cast(lichess.Lichess, li), "abcdefgh")) == []
+    assert li.streams[0].closed
+
+
+def test_closing_a_game_stream_closes_the_connection() -> None:
+    """Closing a game stream before it ends, as `play_game` does before reopening it, closes the connection."""
+    state = {"type": "gameState", "moves": "e2e4", "status": "started"}
+    li = FakeLichess([json.dumps({"type": "gameFull", "state": state}).encode("utf-8"), b"", b""])
+
+    for stream in (lichess_bot.game_stream_lines(cast(lichess.Lichess, li), "abcdefgh"),
+                   lichess_bot.reconnect_game_stream(cast(lichess.Lichess, li), "abcdefgh")):
+        next(stream)
+        stream.close()
+    assert li.streams_opened == 2
+    assert all(opened.closed for opened in li.streams)
+
+
+class StaleOngoingGamesLichess:
+    """Still lists a game as ongoing after it has ended, as lichess.org sometimes does after a game ends on time."""
+
+    def __init__(self) -> None:
+        """Count the requests for the ongoing games."""
+        self.ongoing_games_requests = 0
+
+    def get_ongoing_games(self) -> list[dict[str, str]]:
+        """List the game as ongoing."""
+        self.ongoing_games_requests += 1
+        return [{"gameId": "abcdefgh"}]
+
+
+def make_game(status: str) -> model.Game:
+    """Make a game whose last game state has the given status."""
+    return model.Game({"id": "abcdefgh",
+                       "variant": {"key": "standard", "name": "Standard", "short": "Std"},
+                       "clock": {"initial": 60000, "increment": 2000},
+                       "speed": "bullet",
+                       "perf": {"name": "Bullet"},
+                       "rated": True,
+                       "createdAt": 1600000000000,
+                       "white": {"id": "bo", "name": "bo", "title": "BOT", "rating": 3000},
+                       "black": {"id": "b", "name": "b", "title": "BOT", "rating": 3000},
+                       "initialFen": "startpos",
+                       "type": "gameFull",
+                       "state": {"type": "gameState", "moves": "e2e4", "wtime": 60000, "btime": 0,
+                                 "winc": 2000, "binc": 2000, "status": status}},
+                      "bo", "https://lichess.org", seconds(20))
+
+
+def test_finished_game_stream_is_not_reopened() -> None:
+    """A game stream that sent the final game state is not reopened, even while lichess still lists the game."""
+    li = StaleOngoingGamesLichess()
+
+    for error in (StopIteration(), HTTPError("400 Client Error")):
+        assert not lichess_bot.should_reopen_game_stream(cast(lichess.Lichess, li), make_game("outoftime"), error)
+    assert li.ongoing_games_requests == 0
+
+
+def test_dropped_game_stream_is_reopened_while_game_is_listed() -> None:
+    """A game stream that ends before the game does is reopened while lichess lists the game as ongoing."""
+    li = StaleOngoingGamesLichess()
+
+    assert lichess_bot.should_reopen_game_stream(cast(lichess.Lichess, li), make_game("started"), StopIteration())
+    assert li.ongoing_games_requests == 1
+
+
+def test_game_stream_reopen_delay() -> None:
+    """Reopen at once the first time and after a stable stream; wait longer each time a reopened stream fails fast."""
+    last_reopen = Timer()
+    delays = [lichess_bot.game_stream_reopen_delay(seconds(0), last_reopen)]
+    for _ in range(7):
+        last_reopen.reset()
+        delays.append(lichess_bot.game_stream_reopen_delay(delays[-1], last_reopen))
+    assert delays == [seconds(d) for d in (0, 1, 2, 4, 8, 16, 30, 30)]
+
+    last_reopen.reset()
+    last_reopen.starting_time -= 61
+    assert lichess_bot.game_stream_reopen_delay(seconds(30), last_reopen) == seconds(0)
