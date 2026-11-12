@@ -50,6 +50,23 @@ except Exception as e:
     || log "FEHLER beim Mail-Versand."
 }
 
+restart_bot_gracefully() {
+    TOKEN=$("$REPO/venv/bin/python" -c "import yaml; print(yaml.safe_load(open('config.yml'))['token'])")
+    while true; do
+        PLAYING=$(curl -sf -H "Authorization: Bearer $TOKEN" \
+            https://lichess.org/api/account/playing \
+            | python3 -c "import json,sys; print(len(json.load(sys.stdin)['nowPlaying']))")
+        if [[ "$PLAYING" -eq 0 ]]; then
+            log "Kein Spiel aktiv — starte $SERVICE neu."
+            sudo -n systemctl restart "$SERVICE"
+            log "Neustart abgeschlossen."
+            break
+        fi
+        log "Noch $PLAYING Partie(n) aktiv — prüfe erneut in 3 Minuten."
+        sleep 180
+    done
+}
+
 cd "$REPO"
 
 # ── Upstream fetchen ──────────────────────────────────────────────────────
@@ -60,11 +77,40 @@ if ! git fetch upstream master >> "$LOGFILE" 2>&1; then
     exit 1
 fi
 
-LOCAL=$(git rev-parse HEAD)
-UPSTREAM_HEAD=$(git rev-parse upstream/master)
+# ── Erst origin nachziehen ────────────────────────────────────────────────
+# Commits, die direkt auf den Fork gepusht wurden (z. B. manuell gelöste
+# Konflikte), müssen lokal ankommen — sonst scheitert Merge oder Push erneut.
+if ! git fetch origin master >> "$LOGFILE" 2>&1; then
+    log "FEHLER: git fetch origin gescheitert."
+    exit 1
+fi
+START_HEAD=$(git rev-parse HEAD)
+if ! git merge --ff-only origin/master >> "$LOGFILE" 2>&1; then
+    log "FEHLER: lokaler master und origin/master sind auseinandergelaufen — breche ab."
+    BODY=$(mktemp)
+    {
+        echo "Upstream-Sync abgebrochen: lokaler master lässt sich nicht per Fast-Forward auf origin/master bringen."
+        echo
+        echo "Nur lokal:";  git log --oneline origin/master..HEAD
+        echo
+        echo "Nur auf origin:"; git log --oneline HEAD..origin/master
+        echo
+        echo "Manuell lösen in $REPO (z. B. git merge origin/master, dann git push origin master)."
+    } > "$BODY"
+    send_conflict_mail "ToDo: lichess-bot master und origin auseinandergelaufen" "$BODY"
+    rm -f "$BODY"
+    exit 1
+fi
+[[ "$(git rev-parse HEAD)" != "$START_HEAD" ]] && log "origin/master per Fast-Forward übernommen."
 
-if [[ "$LOCAL" = "$UPSTREAM_HEAD" ]]; then
-    log "Bereits aktuell — kein Merge nötig."
+# ── Pending Upstream-Commits? ─────────────────────────────────────────────
+if git merge-base --is-ancestor upstream/master HEAD; then
+    if [[ "$(git rev-parse HEAD)" = "$START_HEAD" ]]; then
+        log "Bereits aktuell — kein Merge, kein Neustart nötig."
+        exit 0
+    fi
+    log "Upstream schon enthalten, aber neuer Stand von origin — nur Neustart."
+    restart_bot_gracefully
     exit 0
 fi
 
@@ -85,21 +131,7 @@ if git merge --no-ff --no-edit upstream/master > "$MERGE_TMP" 2>&1; then
     fi
     log "Push zu origin (Etschmia/lichess-bot) erfolgreich."
 
-    # Graceful Bot-Neustart
-    TOKEN=$("$REPO/venv/bin/python" -c "import yaml; print(yaml.safe_load(open('config.yml'))['token'])")
-    while true; do
-        PLAYING=$(curl -sf -H "Authorization: Bearer $TOKEN" \
-            https://lichess.org/api/account/playing \
-            | python3 -c "import json,sys; print(len(json.load(sys.stdin)['nowPlaying']))")
-        if [[ "$PLAYING" -eq 0 ]]; then
-            log "Kein Spiel aktiv — starte $SERVICE neu."
-            sudo -n systemctl restart "$SERVICE"
-            log "Neustart abgeschlossen."
-            break
-        fi
-        log "Noch $PLAYING Partie(n) aktiv — prüfe erneut in 3 Minuten."
-        sleep 180
-    done
+    restart_bot_gracefully
 else
     log "KONFLIKT beim Merge — breche ab."
     CONFLICT_FILES=$(git diff --name-only --diff-filter=U)
