@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-Upstream `lichess-bot-devs/lichess-bot` — a Python bridge between the Lichess Bot API and a local chess engine. This checkout is operated as a **Martuni host**: `config.yml` is customized to launch the sibling project at `/home/librechat/enginemartuni` (Rust, UCI). Upstream defaults live in `config.yml.default` — diff against it before changing `config.yml`, and mirror upstream changes into Martuni-specific overrides rather than reverting them.
+Upstream `lichess-bot-devs/lichess-bot` — a Python bridge between the Lichess Bot API and a local chess engine. This checkout is operated as a **Martuni host**: `config.yml` is customized to launch the sibling project at `/var/www/but2/botdir/enginemartuni` (Rust, UCI). Upstream defaults live in `config.yml.default` — diff against it before changing `config.yml`, and mirror upstream changes into Martuni-specific overrides rather than reverting them.
 
 Two configuration truths to keep straight: `config.yml` is the **live operator config** (contains the Lichess OAuth token, engine path, and Martuni-specific tweaks — treat it as secret). `config.yml.default` is the upstream template used both as documentation and as the schema `lib/config.py` validates against.
 
 ## Engine binding (Martuni)
 
-- Engine binary: `/home/librechat/enginemartuni/target/release/martuni` (built in the sibling Rust crate with `cargo build --release`). `engine.dir` + `engine.name` in `config.yml` point here.
+- Engine binary: `/var/www/but2/botdir/enginemartuni/target/release/martuni` (built in the sibling Rust crate with `cargo build --release`). `engine.dir` + `engine.name` in `config.yml` point here.
 - Protocol: `uci`. `ponder: true` — Martuni implements real pondering (open deadline on `go ponder`, TT-based pondermove).
 - `uci_options`: The operator config sets `Hash`, `MoveOverhead` and `SyzygyPath` (explicitly, so tablebases don't depend on which `.env` Martuni finds); Martuni also exposes `Ponder`. Martuni reads its own `.env` from the binary directory / project root before the CWD (override: `MARTUNI_ENV`) — a stray `.env` in this repo used to shadow it. Do **not** add `Threads` or `UCI_ShowWDL` — they are unimplemented. `UCI_Chess960` and `UCI_Variant` are managed automatically by python-chess from the active game, so they must not be listed manually. `MoveOverhead` (no space in the name) is Martuni-internal; `move_overhead` at the top level is lichess-bot's separate network buffer and both apply.
 - Accepted play: `standard`, `chess960`, `atomic`, and `crazyhouse`; bullet, blitz, rapid, and classical. Correspondence is intentionally disabled.
@@ -22,13 +22,13 @@ Höchstens **eine Bot-Partie gleichzeitig**, der zweite Slot bleibt Menschen: se
 
 ## Runtime (systemd)
 
-The bot runs as the system unit **`lichess-bot.service`** (`/etc/systemd/system/lichess-bot.service`, `User=librechat`, `WorkingDirectory=/home/librechat/lichess-bot`, `ExecStart=venv/bin/python lichess-bot.py`, `Restart=always`). Don't start a second instance by hand while debugging — stop the unit first or you will get duplicate Lichess sessions.
+The bot runs as the system unit **`lichess-bot-martuni.service`** (`/etc/systemd/system/lichess-bot-martuni.service`, `User=but2developer`, `WorkingDirectory=/var/www/but2/botdir/lichess-bot-martuni`, `ExecStart=venv/bin/python lichess-bot.py --config config.yml` (absolute paths), `Restart=always`). Don't start a second instance by hand while debugging — stop the unit first or you will get duplicate Lichess sessions.
 
 **Config changes require a restart.** `config.yml` is read exactly once at startup by `load_config` in `lib/lichess_bot.py`; there is no file watcher and no SIGHUP handler (only SIGINT is wired up). The same applies to `lib/versioning.yml` and to rebuilds of Martuni (`cargo build --release` in the sibling repo) — the engine binary is spawned as a subprocess at bot start, so a fresh build is only picked up on restart.
 
-- Hard restart (interrupts live games): `sudo systemctl restart lichess-bot.service`
+- Hard restart (interrupts live games): `sudo systemctl restart lichess-bot-martuni.service`
 - Graceful: set `quit_after_all_games_finish: true` in `config.yml` first, or wait until no games are active, then restart. `Restart=always` brings the process back up automatically if you just let it exit.
-- Logs: `journalctl -u lichess-bot.service -f` (plus the repo's own `lichess_bot_auto_logs/`).
+- Logs: `journalctl -u lichess-bot-martuni.service -f` (plus the repo's own `lichess_bot_auto_logs/`).
 
 ## Common commands
 
